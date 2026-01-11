@@ -25,24 +25,42 @@ def load_model():
     MODEL = joblib.load("model/svm_emotions.joblib")
     print("✔ Model loaded")
 
-def extract_features(file_bytes):
-    y, sr = librosa.load(file_bytes, sr=16000, mono=True)
 
-    # filtro de silêncio
+# =================== V4 SCIENTIFIC FEATURE PIPELINE ===================
+
+def extract_features(fileobj):
+    y, sr = librosa.load(fileobj, sr=16000, mono=True)
+
+    # Silence filter
     if np.mean(librosa.feature.rms(y=y)) < 0.01:
         return None
 
     mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=20)
-    delta = librosa.feature.delta(mfcc)
+    d1 = librosa.feature.delta(mfcc)
+    d2 = librosa.feature.delta(mfcc, order=2)
+
     zcr = librosa.feature.zero_crossing_rate(y)
     rms = librosa.feature.rms(y=y)
 
+    def stats(X):
+        return np.hstack([
+            np.percentile(X, 10, axis=1),
+            np.percentile(X, 25, axis=1),
+            np.percentile(X, 50, axis=1),
+            np.percentile(X, 75, axis=1),
+            np.percentile(X, 90, axis=1),
+        ])
+
     return np.hstack([
-        mfcc.mean(axis=1),
-        delta.mean(axis=1),
-        zcr.mean(),
-        rms.mean()
+        stats(mfcc),
+        stats(d1),
+        stats(d2),
+        np.percentile(zcr, [10,25,50,75,90]),
+        np.percentile(rms, [10,25,50,75,90])
     ])
+
+# =====================================================================
+
 
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
@@ -54,6 +72,6 @@ async def predict(file: UploadFile = File(...)):
 
     feats = feats.reshape(1, -1)
     pred = MODEL.predict(feats)[0]
-    prob = MODEL.predict_proba(feats).max()
+    prob = float(MODEL.predict_proba(feats).max())
 
-    return {"emotion": pred, "confidence": float(prob)}
+    return {"emotion": pred, "confidence": prob}
