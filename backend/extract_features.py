@@ -4,41 +4,42 @@ AUDIO_PATH = "../AudioWAV"
 OUTPUT = "data/features.csv"
 
 MAP = {
-    "ANG": "irritado",
     "HAP": "feliz",
     "SAD": "triste",
-    "FEA": "ansioso",
-    "DIS": "irritado",
-    "NEU": "neutro"
+    "NEU": "neutro",
+    "ANG": "irritado"
 }
 
-# garante que a pasta data/ exista
-os.makedirs(os.path.dirname(OUTPUT), exist_ok=True)
+os.makedirs("data", exist_ok=True)
 
 def extract(file):
-    y, sr = librosa.load(file, sr=16000, mono=True, duration=2.5)
-    mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13, n_fft=512, hop_length=256)
-    zcr = librosa.feature.zero_crossing_rate(y, hop_length=256)
-    rms = librosa.feature.rms(y=y, hop_length=256)
-    pitch = librosa.yin(y, fmin=50, fmax=300)
+    y, sr = librosa.load(file, sr=16000, mono=True)
+    if np.mean(librosa.feature.rms(y=y)) < 0.01:
+        return None
 
-    return np.hstack([mfcc.mean(axis=1), zcr.mean(), rms.mean(), pitch.mean()])
+    mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=20)
+    delta = librosa.feature.delta(mfcc)
+    zcr = librosa.feature.zero_crossing_rate(y)
+    rms = librosa.feature.rms(y=y)
+
+    return np.hstack([
+        mfcc.mean(axis=1),
+        delta.mean(axis=1),
+        zcr.mean(),
+        rms.mean()
+    ])
 
 rows = []
 
-files = [f for f in os.listdir(AUDIO_PATH) if f.endswith(".wav")]
+for f in os.listdir(AUDIO_PATH):
+    if f.endswith(".wav"):
+        parts = f.split("_")
+        if len(parts) > 2 and parts[2] in MAP:
+            emo = MAP[parts[2]]
+            feats = extract(os.path.join(AUDIO_PATH, f))
+            if feats is not None:
+                rows.append(np.hstack([feats, emo]))
 
-for i, f in enumerate(files):
-    parts = f.split("_")
-    if len(parts) > 2 and parts[2] in MAP:
-        emotion = MAP[parts[2]]
-        path = os.path.join(AUDIO_PATH, f)
-        rows.append(np.hstack([extract(path), emotion]))
-
-    if i % 200 == 0:
-        print(f"Processed {i}/{len(files)}")
-
-df = pd.DataFrame(rows, columns=[f"mfcc{i}" for i in range(13)] + ["zcr","rms","pitch","emotion"])
-df.to_csv(OUTPUT, index=False)
-
-print("✔ Feature dataset generated.")
+cols = [f"mfcc{i}" for i in range(20)] + [f"d{i}" for i in range(20)] + ["zcr","rms","emotion"]
+pd.DataFrame(rows, columns=cols).to_csv(OUTPUT, index=False)
+print("✔ Features V3 generated.")
